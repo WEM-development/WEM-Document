@@ -25,7 +25,7 @@ export function isPublicUrl(value: string) : boolean {
 async function withPageAsync<T>(work: (page: Page) => Promise<T>) : Promise<T> {
     const browser = await puppeteer.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
 
     try {

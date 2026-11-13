@@ -3,7 +3,7 @@ runConfig:
   cpu: 1
   maxInstances: 4
   minInstances: 0
-  memory: 512MiB
+  memory: 1GiB
 
 env:
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY

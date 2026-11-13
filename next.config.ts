@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Puppeteer's Chrome (see .puppeteerrc.cjs) must be part of the standalone server bundle.
+  // The serverless Chromium archives are read from disk at runtime, so tracing cannot find them alone.
   outputFileTracingIncludes: {
-    "/**": ["./.puppeteerrc.cjs", "./.cache/puppeteer/**/*"],
+    "/**": ["./node_modules/@sparticuz/chromium/bin/**/*"],
   },
   experimental: {
     serverActions: {

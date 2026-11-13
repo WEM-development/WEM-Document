@@ -6,6 +6,12 @@ runConfig:
   memory: 1GiB
 
 env:
+  # Production renders PDFs with @sparticuz/chromium; Puppeteer's own Chrome is only for local development.
+  - variable: PUPPETEER_SKIP_DOWNLOAD
+    value: "true"
+    availability:
+      - BUILD
+
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
     value: AIzaSyDIRoWWjiT8xhzKWjecyF8xSEuka565vxk
     availability:

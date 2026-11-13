@@ -1,6 +1,27 @@
-import puppeteer, { Page } from "puppeteer";
+import puppeteer, { LaunchOptions, Page } from "puppeteer-core";
 
 const allowedProtocols = ["https:", "data:", "blob:", "about:"];
+
+// App Hosting's runtime image lacks Chrome's system libraries; @sparticuz/chromium ships its own.
+async function getLaunchOptionsAsync() : Promise<LaunchOptions> {
+    if (process.env.NODE_ENV === "production" && process.platform === "linux") {
+        const chromium = (await import("@sparticuz/chromium")).default;
+        chromium.setGraphicsMode = false;
+
+        return {
+            executablePath: await chromium.executablePath(),
+            args: puppeteer.defaultArgs({ args: chromium.args, headless: "shell" }),
+            headless: "shell"
+        };
+    }
+
+    const { executablePath } = await import("puppeteer");
+    return {
+        executablePath: executablePath(),
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        headless: true
+    };
+}
 
 function isPrivateHost(hostname: string) {
     const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -23,10 +44,7 @@ export function isPublicUrl(value: string) : boolean {
 }
 
 async function withPageAsync<T>(work: (page: Page) => Promise<T>) : Promise<T> {
-    const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-    });
+    const browser = await puppeteer.launch(await getLaunchOptionsAsync());
 
     try {
         const page = await browser.newPage();

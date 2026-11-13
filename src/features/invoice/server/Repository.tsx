@@ -14,7 +14,8 @@ export interface InvoiceRepository {
 
 interface InvoiceCache {
     data: Record<string, Invoice>;
-    lastRevalidationDate: Date;
+    // Null until the full list was loaded; single invoices alone never make the list complete.
+    listExpiresAt: Date | null;
     revalidationConfiguration: {
         hours: number,
         minutes: number
@@ -124,27 +125,30 @@ class FirebaseRepository implements InvoiceRepository {
 
     async getAllInvoicesAsync(): Promise<Invoice[]> {
         const currentDate = new Date();
+        const { listExpiresAt, revalidationConfiguration } = this.invoiceCache;
 
-        if (Object.keys(this.invoiceCache.data).length > 0 && this.invoiceCache.lastRevalidationDate < currentDate) {
-            return Object.values(this.invoiceCache.data);
-        } 
-        else {
-            this.invoiceCache.data = {};
-            currentDate.setHours(
-                currentDate.getHours() + this.invoiceCache.revalidationConfiguration.hours,
-                currentDate.getMinutes() + this.invoiceCache.revalidationConfiguration.minutes,
-            );
+        if (listExpiresAt !== null && listExpiresAt > currentDate) {
+            return Object.values(this.invoiceCache.data).sort((a, b) => b.publishDate.getTime() - a.publishDate.getTime());
         }
 
         const snapshot = await getDocs(getCollection(InvoiceScheme));
         const invoices: Invoice[] = [];
+        const data: Record<string, Invoice> = {};
 
         for (const doc of snapshot.docs) {
             const mappedInvoice = await this.mapInvoiceToClientAsync(doc.id, doc.data());
-            this.invoiceCache.data[mappedInvoice.id] = mappedInvoice;
+            data[mappedInvoice.id] = mappedInvoice;
 
             invoices.push(mappedInvoice);
         }
+
+        const expiresAt = new Date(currentDate);
+        expiresAt.setHours(
+            expiresAt.getHours() + revalidationConfiguration.hours,
+            expiresAt.getMinutes() + revalidationConfiguration.minutes
+        );
+        this.invoiceCache.data = data;
+        this.invoiceCache.listExpiresAt = expiresAt;
 
         return invoices.sort((a, b) => b.publishDate.getTime() - a.publishDate.getTime());
     }
@@ -212,7 +216,7 @@ class FirebaseRepository implements InvoiceRepository {
 export const Invoices: InvoiceRepository = new FirebaseRepository(
     {
         data: {},
-        lastRevalidationDate: new Date(),
+        listExpiresAt: null,
         revalidationConfiguration: {
             hours: 0,
             minutes: 30

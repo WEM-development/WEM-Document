@@ -1,4 +1,4 @@
-import puppeteer, { HTTPRequest } from "puppeteer";
+import puppeteer, { Page } from "puppeteer";
 
 const allowedProtocols = ["https:", "data:", "blob:", "about:"];
 
@@ -12,18 +12,17 @@ function isPrivateHost(hostname: string) {
     return false;
 }
 
-// The HTML comes from the browser, so keep Chromium away from internal network targets.
-function isAllowedRequest(request: HTTPRequest) {
+// Content comes from the browser, so keep Chromium and nodemailer away from internal network targets.
+export function isPublicUrl(value: string) : boolean {
     try {
-        const url = new URL(request.url());
+        const url = new URL(value);
         return allowedProtocols.includes(url.protocol) && (url.protocol !== "https:" || !isPrivateHost(url.hostname));
     } catch {
         return false;
     }
 }
 
-// Shared by e-mail and archive so both produce identical PDFs.
-export async function renderInvoicePdfAsync(htmlContent: string): Promise<Uint8Array> {
+async function withPageAsync<T>(work: (page: Page) => Promise<T>) : Promise<T> {
     const browser = await puppeteer.launch({
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -36,13 +35,22 @@ export async function renderInvoicePdfAsync(htmlContent: string): Promise<Uint8A
         page.on("request", request => {
             if (request.isInterceptResolutionHandled()) return;
 
-            if (isAllowedRequest(request)) {
+            if (isPublicUrl(request.url())) {
                 request.continue();
             } else {
                 request.abort("blockedbyclient");
             }
         });
 
+        return await work(page);
+    } finally {
+        await browser.close();
+    }
+}
+
+// Shared by e-mail and archive so both produce identical PDFs.
+export async function renderInvoicePdfAsync(htmlContent: string): Promise<Uint8Array> {
+    return await withPageAsync(async page => {
         // Set viewport to A4 dimensions at 96 DPI
         await page.setViewport({
             width: 794,  // 210mm at 96 DPI
@@ -69,7 +77,38 @@ export async function renderInvoicePdfAsync(htmlContent: string): Promise<Uint8A
             },
             scale: 1,
         });
-    } finally {
-        await browser.close();
-    }
+    });
+}
+
+const pngCache = new Map<string, Promise<Uint8Array | null>>();
+
+// Gmail and Outlook do not display SVG, so logos are sent as a 2× PNG; cached per server instance.
+export function renderImageAsPngAsync(url: string, height: number) : Promise<Uint8Array | null> {
+    const key = `${height}:${url}`;
+    if (!isPublicUrl(url)) return Promise.resolve(null);
+
+    const cached = pngCache.get(key);
+    if (cached) return cached;
+
+    const attributeUrl = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const rendering = withPageAsync(async page => {
+        await page.setViewport({ width: 1200, height: height + 40, deviceScaleFactor: 2 });
+        await page.setContent(
+            `<html><body style="margin:0;background:transparent"><img id="image" src="${attributeUrl}" style="display:block;height:${height}px;width:auto"></body></html>`,
+            { waitUntil: "networkidle0" }
+        );
+
+        const isLoaded = await page.$eval("#image", image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0);
+        const image = await page.$("#image");
+        if (!isLoaded || !image) return null;
+
+        return await image.screenshot({ type: "png", omitBackground: true });
+    }).catch(error => {
+        console.error(`Image ${url} could not be rendered:`, error);
+        pngCache.delete(key);
+        return null;
+    });
+
+    pngCache.set(key, rendering);
+    return rendering;
 }

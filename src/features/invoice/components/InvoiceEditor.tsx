@@ -23,6 +23,7 @@ import { ArchiveEntry, FolderSelection, InvoiceFolder } from "@/features/archive
 import { Archive } from "@/features/archive/server/Repository";
 import { archiveInvoiceHtmlAsync, getFolderName, resolveFolderAsync, saveBlob, toSafeFileName } from "@/features/archive/server/Service";
 import { getIdTokenAsync } from "@/features/auth/getIdToken";
+import { getInvoiceEmailData } from "@/features/mailer/Template";
 import { Profile } from "@/features/profile/Models";
 import { Invoice, InvoiceItem } from "../Models";
 import { sendInvoiceEmailAction } from "../server/Actions";
@@ -185,6 +186,10 @@ export default function InvoiceEditor({ loadInvoice, loadProfile, isSaved: isIni
 
     const handleSendRequest = () => {
         const foundIssues = getInvoiceIssues(invoice, { forSend: true });
+        if (!loadProfile.emailProvider || !loadProfile.emailPass) {
+            foundIssues.push("V profilu chybí nastavení odesílání e-mailů (SMTP server a heslo). Bez něj fakturu nelze odeslat.");
+        }
+
         if (foundIssues.length > 0) {
             showIssues(foundIssues);
             return;
@@ -203,7 +208,18 @@ export default function InvoiceEditor({ loadInvoice, loadProfile, isSaved: isIni
                 return;
             }
 
-            await sendInvoiceEmailAction(await getIdTokenAsync(), loadProfile, invoice.customer.email!, emailContent, htmlContent, invoice.id);
+            const result = await sendInvoiceEmailAction(await getIdTokenAsync(), loadProfile, {
+                recipientEmail: invoice.customer.email ?? "",
+                subject: emailContent.subject,
+                emailData: getInvoiceEmailData(invoice, loadProfile, emailContent.message),
+                paymentDetails: invoice.paymentDetails,
+                invoiceHtml: htmlContent
+            });
+
+            if (!result.isSent) {
+                addToast({ title: "Fakturu se nepodařilo odeslat", description: result.error, color: "danger" });
+                return;
+            }
 
             addToast({ title: "Faktura odeslána", description: invoice.customer.email, color: "success" });
             setIsSendOpen(false);
